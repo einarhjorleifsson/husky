@@ -68,6 +68,7 @@
 #' }
 #' }
 #'
+#' @export
 Calc.index <- function (sfile,
                         colname,
                         strata.list,
