@@ -15,5 +15,7 @@ Skala.med.toglengd(lengdir, Stodvar, std.toglengd)
 }
 \description{
 XXX
+
+location "/net/hafkaldi/export/u2/reikn/Splus5/GETALK/.RData"
 }
 

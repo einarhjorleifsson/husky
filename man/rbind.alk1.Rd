@@ -13,5 +13,7 @@ rbind.alk1(fj1, fj2)
 }
 \description{
 XXX
+
+location: /net/hafkaldi/export/u2/reikn/Splus5/GETALK/.RData
 }
 

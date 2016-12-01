@@ -2,6 +2,8 @@
 #'
 #' @description XXX
 #'
+#' location: /net/hafkaldi/export/u2/reikn/Splus5/GETALK/.RData
+#'
 #' @export
 #'
 #' @param ALK XXX

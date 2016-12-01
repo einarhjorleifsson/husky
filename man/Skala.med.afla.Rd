@@ -13,5 +13,7 @@ Skala.med.afla(lengdir, afli)
 }
 \description{
 XXX
+
+location "/net/hafkaldi/export/u2/reikn/Splus5/GETALK/.RData"
 }
 
