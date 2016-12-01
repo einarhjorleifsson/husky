@@ -22,4 +22,11 @@ NULL
 #' @author Hoskuldur Bjornsson
 NULL
 
+#' @name LENGDIR
+#' @title XXX
+#' @description XXX
+#' location: /net/hafkaldi/export/u2/reikn/Splus5/SMB/.RData
+#' @docType data
+#' @author Hoskuldur Bjornsson
+NULL
 

@@ -10,12 +10,13 @@ Maintainer: Einar Hjorleifsson <einar.hjorleifsson@gmail.com>
 Description: A collection of hoski-functions.
 Depends:
     R (>= 3.1.1)
-Imports:
+Imports: 
 License: GPL (>= 2)
 LazyData: TRUE
 URL: http://github.com/einarhjorleifsson/husky
 BugReports: http://github.com/einarhjorleifsson/husky/issues
 Suggests:
-    knitr
+    knitr,
+    rmarkdown
 VignetteBuilder: knitr
 RoxygenNote: 5.0.1

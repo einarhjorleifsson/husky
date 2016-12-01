@@ -1,0 +1,175 @@
+---
+title: "Rallvísitölur"
+author: "Einar Hjörleifsson"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Rallvísitölur}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = TRUE)
+```
+
+```{r}
+library(fjolst)
+library(husky)
+```
+
+```{r}
+YEARS <- 1985:1986  # just for testing
+TEG <- 1
+KYN <- TRUE
+lwcoeff <- LWCOEFF[[as.character(TEG)]]
+lengdir <- LENGDIR[[as.character(TEG)]]
+```
+
+```{r}
+STODVAR2 <- dplyr::bind_rows(STODVAR)  # EH added
+
+for (j in 1:length(YEARS)) {
+  
+  #st1 <- STODVAR$'y1985'[STODVAR$'y1985'$tognumer %in% 1:39,]
+  st1 <- STODVAR2[STODVAR2$ar == YEARS[j] & STODVAR2$tognumer %in% 1:39,] # EH added
+  tmp <- lesa.lengdir(st1$synis.id,TEG,col.names="kyn")
+  tmp1 <- lesa.numer(st1$synis.id,TEG) 
+  tmp <- Skala.med.toldum(tmp,tmp1)
+  i <- is.na(tmp$fj.alls) 
+  tmp$fj.alls[i] <- 0
+  tmp$bio <- tmp$fj.alls*lwcoeff[1]*tmp$lengd^lwcoeff[2]/1e6 # tonn
+  tmp$fj.alls <- tmp$fj.alls/1e3 # þúsundir
+  
+  
+  for( i in 1:length(lengdir)) {
+    
+    #print(i) 
+    tmp1 <- tmp[tmp$lengd==lengdir[i],]
+    
+    if(nrow(tmp1) > 0) {
+      x <- apply.shrink(tmp1$fj.alls,tmp1$synis.id,sum) 
+      names(x) <- c("synis.id","fj")
+      st <- husky:::join(st1[,c("newstrata","toglengd","synis.id")],x,"synis.id",set=0)
+    } else {
+      st <- st1[,c("newstrata","toglengd","synis.id")]
+      st$fj <- rep(0,nrow(st)) 
+    }
+    
+    if(KYN) {
+      tmp1 <- tmp[tmp$lengd==lengdir[i] & tmp$kyn==1 & !is.na(tmp$kyn),]
+      if(nrow(tmp1) > 0) {
+        x <- apply.shrink(tmp1$fj.alls,tmp1$synis.id,sum) 
+        names(x) <- c("synis.id","fjhaenga")
+        st <- husky:::join(st,x,"synis.id",set=0)
+      } else {
+        st$fjhaenga <- rep(0,nrow(st)) 
+      }
+      
+      tmp1 <- tmp[tmp$lengd==lengdir[i] & tmp$kyn==2 & !is.na(tmp$kyn),]
+      if(nrow(tmp1) > 0) {
+        x <- apply.shrink(tmp1$fj.alls,tmp1$synis.id,sum) 
+        names(x) <- c("synis.id","fjhrygna")
+        st <- husky:::join(st,x,"synis.id",set=0)
+      }
+      else {
+        st$fjhrygna <- rep(0,nrow(st)) 
+      }
+    }
+    
+    tmp1 <- tmp[tmp$lengd >= lengdir[i],]
+    if(nrow(tmp1) > 0) {
+      x <- apply.shrink(tmp1$bio,tmp1$synis.id,sum) 
+      names(x) <- c("synis.id","bioge") 
+      st <- husky:::join(st,x,"synis.id",set=0)
+    } else {
+      st$bioge <- rep(0,nrow(st)) 
+    }
+    
+    tmp1 <- tmp[tmp$lengd <= lengdir[i],]
+    if(nrow(tmp1) > 0) {
+      x <- apply.shrink(tmp1$fj.alls,tmp1$synis.id,sum) 
+      names(x) <- c("synis.id","fjle")
+      st <- husky:::join(st,x,"synis.id",set=0)
+    } else {
+      st$fjle <- rep(0,nrow(st)) 
+    }
+    
+    
+    tmp.visit <- Calc.index(st,"fj")
+    
+    tmp.biovisit <- Calc.index(st,"bioge")
+    tmp.seidavisit <- Calc.index(st,"fjle")
+    
+    if(KYN) {
+      tmp.haengavisit <- Calc.index(st,"fjhaenga")
+      tmp.hrygnuvisit <- Calc.index(st,"fjhrygna")
+    }
+    
+    tmp.visit1 <- tmp.visit$result[,c("strata","total","cv")]
+    names(tmp.visit1)[2:3] <- c("fj","cv.fj")
+    tmp.visit1$bio.staerri <- tmp.biovisit$result[,"total"]
+    tmp.visit1$cv.bio.staerri <- tmp.biovisit$result[,"cv"]
+    tmp.visit1$fj.minni <- tmp.seidavisit$result[,"total"]
+    tmp.visit1$cv.fj.minni <- tmp.seidavisit$result[,"cv"]
+    
+    if(KYN) {
+      tmp.visit1$fj.haenga <- tmp.haengavisit$result[,"total"]
+      tmp.visit1$cv.fj.haenga <- tmp.haengavisit$result[,"cv"]
+      tmp.visit1$fj.hrygna <- tmp.hrygnuvisit$result[,"total"]
+      tmp.visit1$cv.fj.hrygna <- tmp.hrygnuvisit$result[,"cv"]
+    }
+    
+    tmp.visit2 <- tmp.visit$aggr.output[,c("total","cv")]
+    names(tmp.visit2) <- c("fj","cv.fj") 
+    tmp.visit2$bio.staerri <- tmp.biovisit$aggr.output[,"total"]
+    tmp.visit2$cv.bio.staerri <- tmp.biovisit$aggr.output[,"cv"]
+    tmp.visit2$fj.minni <- tmp.seidavisit$aggr.output[,"total"]
+    tmp.visit2$cv.fj.minni <- tmp.seidavisit$aggr.output[,"cv"]
+    
+    if(KYN) {
+      tmp.visit2$fj.haenga <- tmp.haengavisit$aggr.output[,"total"]
+      tmp.visit2$cv.fj.haenga <- tmp.haengavisit$aggr.output[,"cv"]
+      tmp.visit2$fj.hrygna <- tmp.hrygnuvisit$aggr.output[,"total"]
+      tmp.visit2$cv.fj.hrygna <- tmp.hrygnuvisit$aggr.output[,"cv"]
+    }
+    
+    
+    tmp.visit2$svaedi <- dimnames(tmp.visit2)[[1]]
+    tmp.visit2$svaedisnr <- 1:nrow(tmp.visit2)
+    dimnames(tmp.visit2)[[1]] <- 1:nrow(tmp.visit2)
+    tmp.visit1$lengd <- rep(lengdir[i],nrow(tmp.visit1))
+    tmp.visit2$lengd <- rep(lengdir[i],nrow(tmp.visit2))
+    tmp.visit1$ar <- rep(999,nrow(tmp.visit1))
+    tmp.visit2$ar <- rep(999,nrow(tmp.visit2))
+    if(i == 1 ) {
+      tmp.visit1a <- tmp.visit1
+      tmp.visit2a <- tmp.visit2
+    } else {
+      tmp.visit1a <- rbind(tmp.visit1a,tmp.visit1)
+      tmp.visit2a <- rbind(tmp.visit2a,tmp.visit2)
+    }
+  } # End lengdir loop
+  
+  
+  if(YEARS[j] ==  1985) {   # EH ammended
+    base.visit <- tmp.visit1a
+    aggr.visit <- tmp.visit2a
+  }
+  if(YEARS[j] != 1985) {          # EH ammended
+    base.visit <- rbind(base.visit,tmp.visit1a)
+    aggr.visit <- rbind(aggr.visit,tmp.visit2a) 
+  } 
+} # End year loop
+```
+
+
+```{r, eval = FALSE}
+lwcoeff <- LWCOEFF[[as.character(TEG)]]
+# tonn því fjöldi er þegar / 1000 en lengd-þyngdar gefur grömm.  
+aggr.visit$bio <-
+  aggr.visit$fj*lwcoeff[1]*aggr.visit$lengd^lwcoeff[2]/1e3
+base.visit$bio <-
+  base.visit$fj*lwcoeff[1]*base.visit$lengd^lwcoeff[2]/1e3
+```
+
