@@ -1,0 +1,449 @@
+---
+title: "Calculation of survey indices in R"
+author: "Einar Hjörleifsson"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    fig_height: 6.5
+    fig_width: 9.5
+---
+
+# Preamble
+
+A little demo on using only `dplyr` verbs and `ggplot2` to achieve quite a lot of things. Topic is a candidate for the upcoming ICES TCRENV course.
+
+The data used (Icelandic spring groundfish survey) is just a placeholder for the important part - the generic algorithm used to achieve an abjective. In this specific case one has a demonstration of a calculation and visualization of stratified survey indices. Of course with the inclusion of the associated uncertainties.
+
+# Setup
+
+```{r, message = FALSE}
+# devtools::install_github("einarhjorleifsson/smx")
+library(smx)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+```
+
+Some constants:
+```{r}
+std.towlength <- 4             # seamiles
+std.towwidth  <- 17            # meters
+std.area      <- 4 * 17/1852   # standard area swept square nautical miles
+std.cv <- 1                    # for setting the cv as the mean if number of tows in a
+                               #  strata is one
+```
+
+Some functions (are in the smx-package)
+```{r}
+calc_cv <- function (x, xd, area, N)  {
+  Mean = sum(x * area)/sum(area)
+  Sum = sum(x * area)
+  tmpsum = sum(x[!is.na(xd)] * area[!is.na(xd)])
+  Calc.sdev = sqrt(sum(xd[!is.na(xd)]^2 * area[!is.na(xd)]^2/N[!is.na(xd)])/sum(area[!is.na(xd)])^2)
+  Sdev = Calc.sdev * Sum/tmpsum
+  cv = Sdev/Mean
+  return(cv)
+}
+
+trim_towlength <- function (x, std.towlength = 4, min.towlength, max.towlength)  {
+  if (missing(min.towlength)) 
+    min.towlength <- std.towlength/2
+  if (missing(max.towlength)) 
+    max.towlength <- std.towlength * 2
+  x <- ifelse(is.na(x), std.towlength, x)
+  x <- ifelse(x > max.towlength, max.towlength, x)
+  x <- ifelse(x < min.towlength, min.towlength, x)
+  return(x)
+}
+```
+
+# Get in some data
+
+Data for some 9 most common species from the Icelandic spring groundfish survey can be obtained by:
+```{r}
+Station <- read.csv("http://www.hafro.is/~einarhj/data/tcrenv2016/Station.csv") %>%
+  mutate(year = lubridate::year(date1),
+         towlength = trim_towlength(towlength)) %>% 
+  select(id, year, towlength, strata) %>% 
+  arrange(id)
+Length      <- read.csv("http://www.hafro.is/~einarhj/data/tcrenv2016/Length.csv")
+Subsampling <- read.csv("http://www.hafro.is/~einarhj/data/tcrenv2016/Subsampling.csv")
+Stratas     <- read.csv("http://www.hafro.is/~einarhj/data/tcrenv2016/Stratas.csv") %>% 
+  select(strata, area = rall.area)
+```
+
+For the record we have the following table dimenstions:
+```{r}
+d <- data_frame(table = c("Station","Length","Subsampling","Stratas"),
+                rows = c(nrow(Station),nrow(Length),nrow(Subsampling),nrow(Stratas)),
+                columns = c(ncol(Station),ncol(Length),ncol(Subsampling),ncol(Stratas)))
+d
+```
+
+Minimal explanation about the columns in the data tables (pending ...)
+
+# Cod is king
+
+Specify species:
+```{r}
+SPECIES <- 1                   # Cod
+```
+
+__Filter the measurement data for the species in question__
+
+Get the raising factor:
+```{r}
+ss <-
+  Subsampling %>% 
+  filter(species %in% SPECIES) %>%
+  mutate(r = n.total/n.measured) %>% 
+  select(id, r)
+```
+
+Get the length measurements and do the rasing:
+```{r}
+le <- 
+  Length %>% 
+  filter(species == SPECIES) %>%
+  # a double precaution, in case length bins by sex
+  group_by(id, length) %>%
+  summarize(n = sum(n)) %>% 
+  ungroup() %>% 
+  left_join(ss, by="id") %>%
+  mutate(n = n * r / 1e3) %>%     # units of thousands
+  select(-r)
+```
+
+To calculate the indices and the associate distribution statistic for each length class by stratra and then sum for the total one can get away with using only `dplyr` verbs. And because we are calculating the abundance less than and biomass greater than any length class we first generate a data.frame of all combination of id (unique tow stations) and length classes.
+
+Calculation within each strata:
+
+```{r}
+base <- 
+  as_data_frame(expand.grid(length = c(5:140), id = Station$id)) %>% 
+  left_join(Station, by = "id") %>%
+  left_join(le, by=c("id","length")) %>% 
+  arrange(id, length) %>% 
+  group_by(id) %>% # The grouping here is for the cumsum calculation
+  mutate(n  = ifelse(is.na(n),0,n)  * std.towlength / towlength, # standardized to per 4 miles
+         cn = cumsum(n),
+         b  = n * 0.01 * length^3/1e3,
+         cb = sum(b) - cumsum(b) + b) %>%
+  group_by(year, strata, length) %>%
+  summarise(N  = n(),
+            n_m  = mean(n),
+            n_d  = ifelse(N == 1, n_m  * std.cv, sd(n)),
+            cn_m = mean(cn),
+            cn_d = ifelse(N == 1, cn_m * std.cv, sd(cn)),
+            b_m  = mean(b),
+            b_d  = ifelse(N == 1, b_m  * std.cv, sd(b)),
+            cb_m = mean(cb),
+            cb_d = ifelse(N == 1, cb_m * std.cv, sd(cb))) %>% 
+  ungroup() %>% 
+  left_join(Stratas, by = "strata") %>%
+  mutate(area  = area/1.852^2 / std.area,
+         n     = n_m  * area,
+         cn    = cn_m * area,
+         b     = b_m  * area,
+         cb    = cb_m * area)
+```
+
+Combining stratas:
+```{r}
+aggr <- 
+  base %>% 
+  group_by(year, length) %>% 
+  # A la Höski:
+  summarise(n = sum(n),
+            n.cv = calc_cv(n_m,n_d,area,N),
+            b = sum(b),
+            b.cv = calc_cv(b_m,b_d,area,N),
+            cn = sum(cn),
+            cn.cv = calc_cv(cn_m, cn_d, area, N),
+            cb = sum(cb),
+            cb.cv = calc_cv(cb_m, cb_d, area, N))
+```
+
+A minimal explanation of each raised stratified variable:
+
+* `year`: obvious
+* `length`: length class in cm
+* `n`: abundance of a given length class
+* `n.cv`: coefficient of variation of abundance for a given length class
+* `b`: biomass of a given length class
+* `b.cv`: coefficient of variation of biomass for a given length class
+* `cn`: abundance __less__ than or equal to a given length class
+* `cn.cv`: coefficient of variation of abundance __less__ than or equal to a given length class
+* `cb`: biomass __greater__ than or equal to a given length class
+* `cb.cv`: coefficient of variation of biomass __greater__ than or equal to a given length class
+
+Reason for calculating cv's rather e.g. standard error is that the former becomes scalable if the mean is transformed.
+
+Total biomass index:
+```{r, warning = FALSE}
+aggr %>% 
+  filter(length == min(length)) %>%
+    mutate(cb = cb/1e3) %>% 
+  ggplot() +
+  geom_pointrange(aes(year, cb, 
+                      ymin = cb * (1 - cb.cv), 
+                      ymax = cb * (1 + cb.cv)),
+                  col = "black",
+                  lwd = 1,
+                  size = 4) +
+  labs(x = NULL, y = NULL, title = "Cod: Standardized biomass index") +
+  expand_limits(y = 0)
+```
+
+What about big fish with associated cv (lets say 80 cm and greater)?:
+```{r, warning = FALSE}
+aggr %>%
+  filter(length == 80) %>%
+  mutate(cb = cb/1e3) %>% 
+  ggplot() +
+  geom_pointrange(aes(year, cb, 
+                      ymin = cb * (1 - cb.cv), 
+                      ymax = cb * (1 + cb.cv)),
+                  col = "black",
+                  lwd = 1,
+                  size = 4) +
+  labs(x = NULL, y = NULL, title = "Cod: Standardized biomass index of fish 80 cm and bigger") +
+  expand_limits(y = 0)
+```
+
+Total abundance index:
+```{r, warning = FALSE}
+aggr %>% 
+  filter(length == max(length)) %>%
+  mutate(cn = cn/1e3) %>% 
+  ggplot() +
+  geom_pointrange(aes(year, cn, 
+                      ymin = cn * (1 - cn.cv), 
+                      ymax = cn * (1 + cn.cv)),
+                  col = "black",
+                  lwd = 1,
+                  size = 4) +
+  labs(x = NULL, y = NULL, title = "Cod: Standardized abundance index") +
+  expand_limits(y = 0)
+```
+
+
+What abundance of recruiting fish with associated cv (lets say 35 cm and smaller)?:
+```{r, warning = FALSE}
+aggr %>% 
+  filter(length == 35) %>%
+  mutate(cn = cn/1e3) %>% 
+  ggplot() +
+  geom_pointrange(aes(year, cn, 
+                      ymin = cn * (1 - cn.cv), 
+                      ymax = cn * (1 + cn.cv)),
+                  col = "black",
+                  lwd = 1,
+                  size = 4) +
+  labs(x = NULL, y = NULL, title = "Cod: Standardized abundance index of fish 35 cm and smaller") +
+  expand_limits(y = 0)
+```
+
+Or just abundance indices by each length class, here only for year 2000:
+```{r}
+aggr %>% 
+  filter(year %in% 1997:2002) %>%
+  mutate(n = n/1e3) %>% 
+  ggplot() +
+  geom_ribbon(aes(length, ymin = n * (1 - n.cv), ymax = n * (1 + n.cv)), fill = "red") +
+  geom_line(aes(length, n), colour = "blue") +
+  facet_grid(year ~ .) +
+  labs(x = "Length [cm]", y = NULL, title = "Cod: Standardized abundance index and cv by length class") +
+  expand_limits(y = 0)
+```
+
+Equivalent biomass indices over the same time period:
+```{r}
+aggr %>% 
+  filter(year %in% 1997:2002) %>%
+  mutate(b = b/1e3) %>% 
+  ggplot() +
+  geom_ribbon(aes(length, ymin = b * (1 - b.cv), ymax = b * (1 + b.cv)), fill = "red") +
+  geom_line(aes(length, b), colour = "blue") +
+  facet_grid(year ~ .) +
+  labs(x = "Length [cm]", y = NULL, title = "Cod: Standardized biomass index and cv by length class") +
+  expand_limits(y = 0)
+```
+
+# Haddock is food
+
+As above, some data filtering, standardization, summation :
+```{r}
+SPECIES <- 2                   # Haddock
+ss <-
+  Subsampling %>% 
+  filter(species %in% SPECIES) %>%
+  mutate(r = n.total/n.measured) %>% 
+  select(id, r)
+le <- 
+  Length %>% 
+  filter(species == SPECIES) %>%
+  # a double precaution, in case length bins by sex
+  group_by(id, length) %>%
+  summarize(n = sum(n)) %>% 
+  ungroup() %>% 
+  left_join(ss, by="id") %>%
+  mutate(n = n * r / 1e3) %>%     # units of thousands
+  select(-r)
+```
+
+Now just use the inbuild `calc_indices` function in `smx`:
+```{r}
+d <- smx::calc_indices(st = Station, le = le, stratas = Stratas)
+```
+
+And plot some of the stuff:
+```{r, warning = FALSE}
+d$aggr %>% 
+  filter(length == min(length)) %>% 
+  ggplot() +
+  geom_pointrange(aes(year, cb, 
+                      ymin = cb * (1 - cb.cv), 
+                      ymax = cb * (1 + cb.cv)),
+                  col = "black",
+                  lwd = 1,
+                  size = 4) +
+  labs(x = NULL, y = NULL, title = "Haddock: Standardized biomass index") +
+  expand_limits(y = 0)
+```
+
+```{r, warning = FALSE}
+d$aggr %>%
+  filter(length == max(length)) %>%
+  ggplot() +
+  geom_pointrange(aes(year, cn, 
+                      ymin = cn * (1 - cn.cv), 
+                      ymax = cn * (1 + cn.cv)),
+                  col = "black",
+                  lwd = 1,
+                  size = 4) +
+  labs(x = NULL, y = NULL, title = "Haddock: Standardized abundance index") +
+  expand_limits(y = 0)
+```
+
+
+
+# Comparison with the MRI standard code
+
+The primary objective of this part is to compare a script based on the functions (verbs) in the `dplyr` package that produce equivalent survey indices as are currently are obtained via combination of shell scripts and R-scripts at the MRI.
+
+What follows is just a crude comparion with the standard MRI code - just as a __double check__. If you are an outsider forget this part.
+
+```{r, message = FALSE, warning = FALSE}
+attach('/net/hafkaldi/export/u2/reikn/Splus5/SMB/TORSKUR/.RData')
+```
+
+```{r, warning = FALSE}
+ggplot() +
+  geom_pointrange(data = aggr %>% filter(length == min(length)),
+                  aes(year, cb, 
+                      ymin = cb * (1 - cb.cv), 
+                      ymax = cb * (1 + cb.cv)),
+                  col = "black",
+                  lwd = 1,
+                  size = 4) +
+  geom_pointrange(data = aggr.visit %>% filter(svaedi == "Heild", lengd == min(lengd)),
+                  aes(ar, bio.staerri, 
+                      ymin = bio.staerri * (1 - cv.bio.staerri),
+                      ymax = bio.staerri * (1 + cv.bio.staerri)),
+                  colour = "red") +
+  labs(x = NULL, y = NULL, title = "Standardized biomass index")
+```
+
+```{r, warning = FALSE}
+ggplot() +
+  geom_pointrange(data = aggr %>% filter(length == max(length)),
+                  aes(year, cn, 
+                      ymin = cn * (1 - cn.cv), 
+                      ymax = cn * (1 + cn.cv)),
+                  col = "black",
+                  lwd = 1,
+                  size = 4) +
+  geom_pointrange(data = aggr.visit %>% filter(svaedi == "Heild", lengd == max(lengd)),
+                  aes(ar, fj.minni, 
+                      ymin = fj.minni * (1 - cv.fj.minni),
+                      ymax = fj.minni * (1 + cv.fj.minni)),
+                  col = "red") +
+  labs(x = NULL, y = NULL, title = "Standardized abundance index")
+```
+
+Crude check of the base calculations:
+
+```{r, warning = FALSE}
+theme_stripped <- function (base_size = 12, base_family = "") 
+{
+  theme_minimal(base_size = base_size, base_family = base_family) %+replace% 
+    theme(#axis.text = ggplot2::element_blank(),
+          axis.title = ggplot2::element_blank(),
+          panel.grid.minor = ggplot2::element_blank(),
+          panel.grid.major = ggplot2::element_blank(),
+          panel.margin = grid::unit(0, "lines"))
+}
+
+
+year <- 2013
+i <- base.visit$ar == year
+
+d <- base %>% filter(year == 2013)
+
+# Abundance
+ggplot() + geom_line(data=d,aes(length,n),lwd=1,col="black") +
+  facet_wrap(~ strata,scale="free_y") +
+  geom_line(data=base.visit[i,],aes(lengd,fj),col="red") +
+  labs(x = NULL, y = NULL, title = "Abundance") +
+  theme_stripped()
+
+# Biomass
+ggplot() + geom_line(data=d,aes(length,b),lwd=1,col="black") +
+  facet_wrap(~ strata,scale="free_y") +
+  geom_line(data=base.visit[i,],aes(lengd,bio),col="red") +
+  labs(x = NULL, y = NULL, title = "Biomass") +
+  theme_stripped()
+
+# Cumabundance
+ggplot() + geom_line(data=d,aes(length,cn),lwd=1,col="black") +
+  facet_wrap(~ strata,scale="free_y") +
+  geom_line(data=base.visit[i,],aes(lengd,fj.minni),col="red") +
+  labs(x = NULL, y = NULL, title = "Cumulative abundance") +
+  theme_stripped()
+
+# Cumbiomass
+ggplot() + geom_line(data=d,aes(length,cb),lwd=1,col="black") +
+  facet_wrap(~ strata,scale="free_y") +
+  geom_line(data=base.visit[i,],aes(lengd,bio.staerri),col="red")  +
+  labs(x = NULL, y = NULL, title = "Cumulative biomass") +
+  theme_stripped()
+
+# CV abundance
+ggplot() + geom_line(data=d,aes(length,n_d/sqrt(N)/n_m),lwd=1,col="black") +
+  facet_wrap(~ strata,scale="free_y") +
+  geom_line(data=base.visit[i,],aes(lengd,cv.fj),col="red") +
+  labs(x = NULL, y = NULL, title = "CV abundance") +
+  theme_stripped()
+
+# CV cumulative abundance
+ggplot() + geom_line(data=d,aes(length,cn_d/sqrt(N)/cn_m),lwd=1,col="black") +
+  facet_wrap(~ strata,scale="free_y") +
+  geom_line(data=base.visit[i,],aes(lengd,cv.fj.minni),col="red") +
+  labs(x = NULL, y = NULL, title = "Cumulative cv abundance") +
+  theme_stripped()
+
+# CV cumulative biomass
+ggplot() + geom_line(data=d,aes(length,cb_d/sqrt(N)/cb_m),lwd=1,col="black") +
+  facet_wrap(~ strata,scale="free_y") +
+  geom_line(data=base.visit[i,],aes(lengd,cv.bio.staerri),col="red") +
+  labs(x = NULL, y = NULL, title = "Cumulative cv biomass") +
+  theme_stripped()
+```
+
+# The absolute necessity:
+
+```{r}
+devtools::session_info()
+```
+                       
