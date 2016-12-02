@@ -2,12 +2,15 @@
 title: "Rallvísitölur"
 author: "Einar Hjörleifsson"
 date: "`r Sys.Date()`"
-output: rmarkdown::html_vignette
-vignette: >
-  %\VignetteIndexEntry{Rallvísitölur}
-  %\VignetteEngine{knitr::rmarkdown}
-  %\VignetteEncoding{UTF-8}
+output: 
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
 ---
+
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(eval = FALSE)
@@ -76,7 +79,7 @@ lengdir <- LENGDIR[[as.character(TEG)]]
 STODVAR2 <- dplyr::bind_rows(STODVAR)  # EH added
 
 for (j in 1:length(YEARS)) {
-  
+  print(YEARS[j])
   #st1 <- STODVAR$'y1985'[STODVAR$'y1985'$tognumer %in% 1:39,]
   st1 <- STODVAR2[STODVAR2$ar == YEARS[j] & STODVAR2$tognumer %in% 1:39,] # EH added
   tmp <- lesa.lengdir(st1$synis.id,TEG,col.names="kyn")
@@ -197,7 +200,7 @@ for (j in 1:length(YEARS)) {
     }
   } # End lengdir loop
   
-  
+  # EH: Should really accumulate this in a list within the loop
   if(YEARS[j] ==  1985) {   # EH ammended
     base.visit <- tmp.visit1a
     aggr.visit <- tmp.visit2a
@@ -207,39 +210,26 @@ for (j in 1:length(YEARS)) {
     aggr.visit <- rbind(aggr.visit,tmp.visit2a) 
   } 
 } # End year loop
-```
-
-
-```{r, eval = FALSE}
 lwcoeff <- LWCOEFF[[as.character(TEG)]]
 # tonn því fjöldi er þegar / 1000 en lengd-þyngdar gefur grömm.  
 aggr.visit$bio <-
   aggr.visit$fj*lwcoeff[1]*aggr.visit$lengd^lwcoeff[2]/1e3
 base.visit$bio <-
   base.visit$fj*lwcoeff[1]*base.visit$lengd^lwcoeff[2]/1e3
+save(base.visit, aggr.visit, file = "visit.rda")
 ```
 
 
----
-title: "Calculation of survey indices in R"
-author: "Einar Hjörleifsson"
-date: "`r Sys.Date()`"
-output: 
-  html_document: 
-    fig_height: 6.5
-    fig_width: 9.5
----
-
-# Preamble
+### tidyverse
 
 A little demo on using only `dplyr` verbs and `ggplot2` to achieve quite a lot of things. Topic is a candidate for the upcoming ICES TCRENV course.
 
 The data used (Icelandic spring groundfish survey) is just a placeholder for the important part - the generic algorithm used to achieve an abjective. In this specific case one has a demonstration of a calculation and visualization of stratified survey indices. Of course with the inclusion of the associated uncertainties.
 
-# Setup
+#### Setup
 
 ```{r, message = FALSE}
-# devtools::install_github("einarhjorleifsson/smx")
+# devtools::install_github("einarhjorleifsson/smx", dependencies = FALSE)
 library(smx)
 library(dplyr)
 library(ggplot2)
@@ -256,7 +246,7 @@ std.cv <- 1                    # for setting the cv as the mean if number of tow
 ```
 
 Some functions (are in the smx-package)
-```{r}
+```{r, eval = FALSE}
 calc_cv <- function (x, xd, area, N)  {
   Mean = sum(x * area)/sum(area)
   Sum = sum(x * area)
@@ -279,18 +269,34 @@ trim_towlength <- function (x, std.towlength = 4, min.towlength, max.towlength) 
 }
 ```
 
-# Get in some data
+#### Get in some data
 
 Data for some 9 most common species from the Icelandic spring groundfish survey can be obtained by:
 ```{r}
-Station <- read.csv("http://www.hafro.is/~einarhj/data/tcrenv2016/Station.csv") %>%
-  mutate(year = lubridate::year(date1),
-         towlength = trim_towlength(towlength)) %>% 
-  select(id, year, towlength, strata) %>% 
+#library(dplyrOracle)
+#library(mar)
+db <- src_oracle("mar")
+Station <- 
+  #readr::read_csv("http://www.hafro.is/~einarhj/data/tcrenv2016/Station.csv") %>%
+  STODVAR %>% 
+  bind_rows() %>% 
+  select(id = synis.id, year = ar, towlength = toglengd, strata) %>% 
+  mutate(towlength = trim_towlength(towlength)) %>% 
   arrange(id)
-Length      <- read.csv("http://www.hafro.is/~einarhj/data/tcrenv2016/Length.csv")
-Subsampling <- read.csv("http://www.hafro.is/~einarhj/data/tcrenv2016/Subsampling.csv")
-Stratas     <- read.csv("http://www.hafro.is/~einarhj/data/tcrenv2016/Stratas.csv") %>% 
+Length <- 
+  lesa.lengdir(Station$id, TEG, col.names="kyn") %>% 
+  mutate(species = TEG) %>% 
+  select(id = synis.id, species, length = lengd,
+         n = fjoldi, sex = kyn)
+Subsampling <-
+  lesa.numer(Station$id, TEG) %>% 
+  mutate(species = TEG) %>% 
+  select(id = synis.id, species,
+         n.counted = fj.talid,
+         n.measured = fj.maelt) %>% 
+  mutate(n.total = n.counted + n.measured)
+Stratas <- 
+  read.csv("http://www.hafro.is/~einarhj/data/tcrenv2016/Stratas.csv") %>% 
   select(strata, area = rall.area)
 ```
 
@@ -304,7 +310,7 @@ d
 
 Minimal explanation about the columns in the data tables (pending ...)
 
-# Cod is king
+#### Cod is king
 
 Specify species:
 ```{r}
@@ -377,13 +383,13 @@ aggr <-
   group_by(year, length) %>% 
   # A la Höski:
   summarise(n = sum(n),
-            n.cv = calc_cv(n_m,n_d,area,N),
+            n.cv = smx:::calc_cv(n_m,n_d,area,N),
             b = sum(b),
-            b.cv = calc_cv(b_m,b_d,area,N),
+            b.cv = smx:::calc_cv(b_m,b_d,area,N),
             cn = sum(cn),
-            cn.cv = calc_cv(cn_m, cn_d, area, N),
+            cn.cv = smx:::calc_cv(cn_m, cn_d, area, N),
             cb = sum(cb),
-            cb.cv = calc_cv(cb_m, cb_d, area, N))
+            cb.cv = smx:::calc_cv(cb_m, cb_d, area, N))
 ```
 
 A minimal explanation of each raised stratified variable:
@@ -400,6 +406,11 @@ A minimal explanation of each raised stratified variable:
 * `cb.cv`: coefficient of variation of biomass __greater__ than or equal to a given length class
 
 Reason for calculating cv's rather e.g. standard error is that the former becomes scalable if the mean is transformed.
+
+Now just use the inbuild `calc_indices` function in `smx`:
+```{r}
+d <- smx::calc_indices(st = Station, le = le, stratas = Stratas)
+```
 
 Total biomass index:
 ```{r, warning = FALSE}
@@ -492,7 +503,7 @@ aggr %>%
   expand_limits(y = 0)
 ```
 
-# Haddock is food
+#### Haddock is food
 
 As above, some data filtering, standardization, summation :
 ```{r}
@@ -548,16 +559,15 @@ d$aggr %>%
   expand_limits(y = 0)
 ```
 
-
-
-# Comparison with the MRI standard code
+### Comparison
 
 The primary objective of this part is to compare a script based on the functions (verbs) in the `dplyr` package that produce equivalent survey indices as are currently are obtained via combination of shell scripts and R-scripts at the MRI.
 
 What follows is just a crude comparion with the standard MRI code - just as a __double check__. If you are an outsider forget this part.
 
 ```{r, message = FALSE, warning = FALSE}
-attach('/net/hafkaldi/export/u2/reikn/Splus5/SMB/TORSKUR/.RData')
+# attach('/net/hafkaldi/export/u2/reikn/Splus5/SMB/TORSKUR/.RData')
+attach("visit.rda")
 ```
 
 ```{r, warning = FALSE}

@@ -1,0 +1,57 @@
+---
+title: "Survey stratas"
+author: "Einar Hjörleifsson"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{stratas}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = TRUE,
+                      echo = FALSE,
+                      message = FALSE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+```{r, echo = TRUE}
+attach("/net/hafkaldi/export/u2/reikn/Splus5/SurveyWork/OldStratas/.RData")
+```
+
+```{r}
+strata <- 
+  STRATAS %>% 
+  bind_rows(.id = "strata")
+strata %>% 
+  ggplot(aes(lon, lat, fill = strata)) +
+  geom_polygon() +
+  coord_quickmap() +
+  scale_x_continuous(NULL, NULL) +
+  scale_y_continuous(NULL, NULL) +
+  theme(legend.position = "none")
+detach("file:/net/hafkaldi/export/u2/reikn/Splus5/SurveyWork/OldStratas/.RData")
+```
+
+```{r, echo = TRUE}
+attach("/net/hafkaldi/export/u2/reikn/Splus5/SurveyWork/NewStratas/.RData")
+```
+
+```{r}
+strata <- 
+  STRATAS %>% 
+  bind_rows(.id = "strata")
+strata %>% 
+  ggplot(aes(lon, lat, fill = strata)) +
+  geom_polygon() +
+  coord_quickmap() +
+  scale_x_continuous(NULL, NULL) +
+  scale_y_continuous(NULL, NULL) +
+  theme(legend.position = "none")
+detach("file:/net/hafkaldi/export/u2/reikn/Splus5/SurveyWork/NewStratas/.RData")
+```
+
