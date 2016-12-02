@@ -219,7 +219,6 @@ base.visit$bio <-
 save(base.visit, aggr.visit, file = "visit.rda")
 ```
 
-
 ### tidyverse
 
 A little demo on using only `dplyr` verbs and `ggplot2` to achieve quite a lot of things. Topic is a candidate for the upcoming ICES TCRENV course.
